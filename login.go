@@ -55,6 +55,8 @@ type Session struct {
 	umqID       string
 	chatMessage int
 	language    string
+
+	accessToken string
 }
 
 const (
@@ -249,7 +251,6 @@ func pollAuthSession(authSession *pb.CAuthentication_BeginAuthSessionViaCredenti
 }
 
 func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessionStatus_Response) error {
-
 	if session.sessionID == "" {
 		randomBytes := make([]byte, 12)
 		if _, err := rand.Read(randomBytes); err != nil {
@@ -260,6 +261,8 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 		hex.Encode(sessionID, randomBytes)
 		session.sessionID = string(sessionID)
 	}
+
+	session.accessToken = *pollAuth.AccessToken
 
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
@@ -415,6 +418,10 @@ func (session *Session) GetSteamID() SteamID {
 
 func (session *Session) SetLanguage(lang string) {
 	session.language = lang
+}
+
+func (session *Session) GetAccessToken() string {
+	return session.accessToken
 }
 
 func NewSessionWithAPIKey(apiKey string) *Session {
