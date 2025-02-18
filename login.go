@@ -269,7 +269,7 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 	writer.WriteField("redir", "https://steamcommunity.com/login/home/?goto=")
 	writer.Close()
 
-	req, _ := http.NewRequest("POST", FinalizeLogin, body)
+	req, _ := http.NewRequest("GET", FinalizeLogin, body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
