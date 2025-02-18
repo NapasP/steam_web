@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/0xAozora/steam/pb"
+	"github.com/NapasP/steam_web/pb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -269,7 +269,7 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 	writer.WriteField("redir", "https://steamcommunity.com/login/home/?goto=")
 	writer.Close()
 
-	req, _ := http.NewRequest("POST", FinalizeLogin, body)
+	req, _ := http.NewRequest("GET", FinalizeLogin, body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
