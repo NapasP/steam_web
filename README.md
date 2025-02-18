@@ -16,7 +16,7 @@ Make sure you have _at least_ Go 1.6 with a GOPATH set then run:
 
 ```
 go get github.com/PuerkitoBio/goquery
-go get github.com/0xAozora/steam
+go get github.com/NapasP/steam_web
 ```
 
 ## Example
@@ -28,7 +28,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/0xAozora/steam"
+	"github.com/NapasP/steam_web"
 )
 
 func main() {
