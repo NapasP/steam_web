@@ -1,9 +1,11 @@
 package steam
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -13,20 +15,47 @@ import (
 	"time"
 )
 
+type TradeOfferState int
+
 const (
-	TradeStateNone = iota
-	TradeStateInvalid
-	TradeStateActive
-	TradeStateAccepted
-	TradeStateCountered
-	TradeStateExpired
-	TradeStateCanceled
-	TradeStateDeclined
-	TradeStateInvalidItems
-	TradeStateCreatedNeedsConfirmation
-	TradeStateCanceledByTwoFactor
-	TradeStateInEscrow
+	Invalid                  TradeOfferState = iota + 1
+	Active                                   // This trade offer has been sent, neither party has acted on it yet.
+	Accepted                                 // The trade offer was accepted by the recipient and items were exchanged.
+	Countered                                // The recipient made a counter offer.
+	Expired                                  // The trade offer was not accepted before the expiration date.
+	Canceled                                 // The sender cancelled the offer.
+	Declined                                 // The recipient declined the offer.
+	InvalidItems                             // Some of the items in the offer are no longer available.
+	CreatedNeedsConfirmation                 // The offer hasn't been sent yet and is awaiting further confirmation.
+	CanceledBySecondFactor                   // Either party canceled the offer via email/mobile confirmation.
+	InEscrow                                 // The trade has been placed on hold.
 )
+
+var ETradeOfferState = struct {
+	Invalid                  TradeOfferState
+	Active                   TradeOfferState
+	Accepted                 TradeOfferState
+	Countered                TradeOfferState
+	Expired                  TradeOfferState
+	Canceled                 TradeOfferState
+	Declined                 TradeOfferState
+	InvalidItems             TradeOfferState
+	CreatedNeedsConfirmation TradeOfferState
+	CanceledBySecondFactor   TradeOfferState
+	InEscrow                 TradeOfferState
+}{
+	Invalid:                  Invalid,
+	Active:                   Active,
+	Accepted:                 Accepted,
+	Countered:                Countered,
+	Expired:                  Expired,
+	Canceled:                 Canceled,
+	Declined:                 Declined,
+	InvalidItems:             InvalidItems,
+	CreatedNeedsConfirmation: CreatedNeedsConfirmation,
+	CanceledBySecondFactor:   CanceledBySecondFactor,
+	InEscrow:                 InEscrow,
+}
 
 const (
 	TradeConfirmationNone = iota
@@ -55,13 +84,23 @@ var (
 
 	apiGetTradeOffer     = APIBaseUrl + "/IEconService/GetTradeOffer/v1/?"
 	apiGetTradeOffers    = APIBaseUrl + "/IEconService/GetTradeOffers/v1/?"
-	apiDeclineTradeOffer = APIBaseUrl + "/IEconService/DeclineTradeOffer/v1/"
-	apiCancelTradeOffer  = APIBaseUrl + "/IEconService/CancelTradeOffer/v1/"
+	apiDeclineTradeOffer = "https://steamcommunity.com/tradeoffer/%s/decline"
+	apiCancelTradeOffer  = "https://steamcommunity.com/tradeoffer/%s/cancel"
+	apiAcceptTradeOffer  = "https://steamcommunity.com/tradeoffer/%s/accept"
+
+	apiMarketItemPrice = "https://steamcommunity.com/market/priceoverview/?currency=18&appid=730&market_hash_name=%s"
 
 	ErrReceiptMatch        = errors.New("unable to match items in trade receipt")
 	ErrCannotAcceptActive  = errors.New("unable to accept a non-active trade")
 	ErrCannotFindOfferInfo = errors.New("unable to match data from trade offer url")
 )
+
+type ItemPrice struct {
+	Success     bool   `json:"success"`
+	LowestPrice string `json:"lowest_price"`
+	Volume      string `json:"volume"`
+	MedianPrice string `json:"median_price"`
+}
 
 type EconItem struct {
 	AssetID    uint64 `json:"assetid,string,omitempty"`
@@ -160,34 +199,22 @@ func (session *Session) GetTradeOffer(id uint64) (*TradeOffer, error) {
 	return response.Inner.Offer, nil
 }
 
-func testBit(bits uint32, bit uint32) bool {
-	return (bits & bit) == bit
-}
+// func testBit(bits uint32, bit uint32) bool {
+// 	return (bits & bit) == bit
+// }
 
-func (session *Session) GetTradeOffers(filter uint32, timeCutOff time.Time) (*TradeOfferResponse, error) {
+func (session *Session) GetTradeOffers() (*TradeOfferResponse, error) {
 	params := url.Values{
-		"key": {session.apiKey},
-	}
-	if testBit(filter, TradeFilterSentOffers) {
-		params.Set("get_sent_offers", "1")
+		"access_token": {session.accessToken},
+		"language":     {"1"},
 	}
 
-	if testBit(filter, TradeFilterRecvOffers) {
-		params.Set("get_received_offers", "1")
-	}
-
-	if testBit(filter, TradeFilterActiveOnly) {
-		params.Set("active_only", "1")
-	}
-
-	if testBit(filter, TradeFilterItemDescriptions) {
-		params.Set("get_descriptions", "1")
-	}
-
-	if testBit(filter, TradeFilterHistoricalOnly) {
-		params.Set("historical_only", "1")
-		params.Set("time_historical_cutoff", strconv.FormatInt(timeCutOff.Unix(), 10))
-	}
+	params.Set("get_sent_offers", "1")
+	params.Set("get_received_offers", "1")
+	params.Set("active_only", "1")
+	params.Set("get_descriptions", "1")
+	params.Set("historical_only", "0")
+	params.Set("time_historical_cutoff", "")
 
 	resp, err := session.client.Get(apiGetTradeOffers + params.Encode())
 	if resp != nil {
@@ -377,10 +404,10 @@ func (session *Session) SendTradeOffer(offer *TradeOffer, sid SteamID, token str
 	// Just test mobile confirmation, email is deprecated
 	if response.MobileConfirmationRequired {
 		offer.ConfirmationMethod = TradeConfirmationMobileApp
-		offer.State = TradeStateCreatedNeedsConfirmation
+		offer.State = uint8(ETradeOfferState.CreatedNeedsConfirmation)
 	} else {
 		// set state to active
-		offer.State = TradeStateActive
+		offer.State = uint8(ETradeOfferState.Active)
 	}
 
 	return nil
@@ -424,94 +451,116 @@ func (session *Session) GetTradeReceivedItems(receiptID uint64) ([]*InventoryIte
 }
 
 func (session *Session) DeclineTradeOffer(id uint64) error {
-	resp, err := session.client.PostForm(apiDeclineTradeOffer, url.Values{
-		"key":          {session.apiKey},
-		"tradeofferid": {strconv.FormatUint(id, 10)},
-	})
-	if resp != nil {
-		resp.Body.Close()
-	}
+	tradeID := strconv.FormatUint(id, 10)
 
+	data := url.Values{}
+	data.Set("sessionid", session.sessionID)
+
+	req, err := http.NewRequest("POST", fmt.Sprintf(apiDeclineTradeOffer, tradeID), bytes.NewBufferString(data.Encode()))
 	if err != nil {
 		return err
 	}
 
-	result := resp.Header.Get("x-eresult")
-	if result != "1" {
-		return fmt.Errorf("cannot decline trade: %s", result)
+	req.Header.Set("referer", fmt.Sprintf("https://steamcommunity.com/tradeoffer/%s", tradeID))
+	req.Header.Set("origin", "https://steamcommunity.com")
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
+
+	resp, err := session.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}
 
 	return nil
 }
 
 func (session *Session) CancelTradeOffer(id uint64) error {
-	resp, err := session.client.PostForm(apiCancelTradeOffer, url.Values{
-		"key":          {session.apiKey},
-		"tradeofferid": {strconv.FormatUint(id, 10)},
-	})
-	if resp != nil {
-		resp.Body.Close()
-	}
+	tradeID := strconv.FormatUint(id, 10)
 
+	data := url.Values{}
+	data.Set("sessionid", session.sessionID)
+
+	req, err := http.NewRequest("POST", fmt.Sprintf(apiCancelTradeOffer, tradeID), bytes.NewBufferString(data.Encode()))
 	if err != nil {
 		return err
 	}
 
-	result := resp.Header.Get("x-eresult")
-	if result != "1" {
-		return fmt.Errorf("cannot cancel trade: %s", result)
+	req.Header.Set("referer", fmt.Sprintf("https://steamcommunity.com/tradeoffer/%s", tradeID))
+	req.Header.Set("origin", "https://steamcommunity.com")
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
+
+	resp, err := session.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}
 
 	return nil
 }
 
 func (session *Session) AcceptTradeOffer(id uint64) error {
-	tid := strconv.FormatUint(id, 10)
-	postURL := "https://steamcommunity.com/tradeoffer/" + tid
+	tradeID := strconv.FormatUint(id, 10)
 
-	req, err := http.NewRequest(
-		http.MethodPost,
-		postURL+"/accept",
-		strings.NewReader(url.Values{
-			"sessionid":    {session.sessionID},
-			"serverid":     {"1"},
-			"tradeofferid": {tid},
-		}.Encode()),
-	)
+	data := url.Values{}
+	data.Set("sessionid", session.sessionID)
+	data.Set("serverid", "1")
+	data.Set("tradeofferid", tradeID)
+	data.Set("captcha", "")
+	data.Set("partner", "4747")
+
+	req, err := http.NewRequest("POST", fmt.Sprintf(apiAcceptTradeOffer, tradeID), bytes.NewBufferString(data.Encode()))
 	if err != nil {
 		return err
 	}
 
-	req.Header.Add("Referer", postURL)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("referer", fmt.Sprintf("https://steamcommunity.com/tradeoffer/%s", tradeID))
+	req.Header.Set("origin", "https://steamcommunity.com")
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
 
 	resp, err := session.client.Do(req)
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http error: %d", resp.StatusCode)
-	}
-
-	type Response struct {
-		ErrorMessage string `json:"strError"`
-	}
-
-	var response Response
-	if err = json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return err
-	}
-
-	if len(response.ErrorMessage) != 0 {
-		return errors.New(response.ErrorMessage)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}
 
 	return nil
+}
+
+func (session *Session) GetMarketPrice(marketName string) (dataPrice *ItemPrice, err error) {
+	resp, err := session.client.Get(fmt.Sprintf(apiMarketItemPrice, url.QueryEscape(marketName)))
+	if err != nil {
+		return
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http error: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	err = json.Unmarshal(body, &dataPrice)
+	if err != nil {
+		return
+	}
+
+	return
 }
 
 func (offer *TradeOffer) Send(session *Session, sid SteamID, token string) error {

@@ -56,7 +56,8 @@ type Session struct {
 	chatMessage int
 	language    string
 
-	accessToken string
+	accessToken     string
+	clientSessionID string
 }
 
 const (
@@ -262,6 +263,17 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 		session.sessionID = string(sessionID)
 	}
 
+	if session.clientSessionID == "" {
+		randomBytes := make([]byte, 8)
+		if _, err := rand.Read(randomBytes); err != nil {
+			return err
+		}
+
+		clientSessionID := make([]byte, hex.EncodedLen(len(randomBytes)))
+		hex.Encode(clientSessionID, randomBytes)
+		session.clientSessionID = string(clientSessionID)
+	}
+
 	session.accessToken = *pollAuth.AccessToken
 
 	body := new(bytes.Buffer)
@@ -269,10 +281,11 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 
 	writer.WriteField("nonce", *pollAuth.RefreshToken)
 	writer.WriteField("sessionid", session.sessionID)
+	writer.WriteField("clientsessionid", session.clientSessionID)
 	writer.WriteField("redir", "https://steamcommunity.com/login/home/?goto=")
 	writer.Close()
 
-	req, _ := http.NewRequest("GET", FinalizeLogin, body)
+	req, _ := http.NewRequest("POST", FinalizeLogin, body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
@@ -315,6 +328,7 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 
 		req, _ = http.NewRequest("POST", info.URL, body)
 		req.AddCookie(&http.Cookie{Name: "sessionid", Value: session.sessionID})
+		req.AddCookie(&http.Cookie{Name: "clientsessionid", Value: session.clientSessionID})
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -323,6 +337,8 @@ func (session *Session) finalizeLogin(pollAuth *pb.CAuthentication_PollAuthSessi
 
 		for _, cookie := range resp.Cookies() {
 			if cookie.Name == "steamLoginSecure" {
+				jar.SetCookies(&url.URL{Scheme: "https", Host: "steamcommunity.com"}, []*http.Cookie{cookie, {Name: "steamLoginSecure", Value: cookie.Value, SameSite: http.SameSiteNoneMode, Secure: true, HttpOnly: true, Path: "/"}})
+
 				jar.SetCookies(&url.URL{Scheme: "https", Host: "steamcommunity.com"}, []*http.Cookie{cookie, {Name: "sessionid", Value: session.sessionID, SameSite: http.SameSiteNoneMode, Secure: true, HttpOnly: true, Path: "/"}})
 				break
 			}
@@ -400,12 +416,13 @@ func (session *Session) Refresh() error {
 }
 
 func (session Session) addMobileAuthCookies() {
-
 	cookies := []*http.Cookie{
 		{Name: "mobileClientVersion", Value: "0 (2.1.3)"},
 		{Name: "mobileClient", Value: "android"},
 		{Name: "steamid", Value: session.oauth.SteamID.ToString()},
 		{Name: "Steam_Language", Value: "english"},
+		{Name: "timezoneOffset", Value: "0.0"},
+		{Name: "clientsessionid", Value: session.clientSessionID},
 		{Name: "dob", Value: ""},
 	}
 
@@ -416,12 +433,24 @@ func (session *Session) GetSteamID() SteamID {
 	return session.oauth.SteamID
 }
 
+func (session *Session) GetCookies() http.CookieJar {
+	return session.client.Jar
+}
+
 func (session *Session) SetLanguage(lang string) {
 	session.language = lang
 }
 
 func (session *Session) GetAccessToken() string {
 	return session.accessToken
+}
+
+func (session *Session) GetSessionID() string {
+	return session.sessionID
+}
+
+func (session *Session) GetClient() *http.Client {
+	return session.client
 }
 
 func NewSessionWithAPIKey(apiKey string) *Session {
