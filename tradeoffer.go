@@ -180,7 +180,7 @@ type APIResponse struct {
 
 func (session *Session) GetTradeOffer(id uint64) (*TradeOffer, error) {
 	resp, err := session.client.Get(apiGetTradeOffer + url.Values{
-		"key":          {session.apiKey},
+		"access_token": {session.accessToken},
 		"tradeofferid": {strconv.FormatUint(id, 10)},
 	}.Encode())
 	if resp != nil {
