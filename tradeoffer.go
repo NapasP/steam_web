@@ -116,14 +116,17 @@ type EconItem struct {
 type EconDesc struct {
 	Type  string `json:"type"`
 	Value string `json:"value"`
-	Color string `json:"color"`
+	Name  string `json:"name,omitempty"`
+	Color string `json:"color,omitempty"`
 }
 
+// EconTag is a Steam economy item tag (category / wear / etc.).
 type EconTag struct {
-	InternalName          string `json:"internal_name"`
 	Category              string `json:"category"`
+	InternalName          string `json:"internal_name"`
 	LocalizedCategoryName string `json:"localized_category_name"`
 	LocalizedTagName      string `json:"localized_tag_name"`
+	Color                 string `json:"color,omitempty"`
 }
 
 type EconAction struct {
@@ -132,22 +135,32 @@ type EconAction struct {
 }
 
 type EconItemDesc struct {
-	ClassID         uint64        `json:"classid,string"`    // for matching with EconItem
-	InstanceID      uint64        `json:"instanceid,string"` // for matching with EconItem
-	Tradable        bool          `json:"tradable"`
-	BackgroundColor string        `json:"background_color"`
-	IconURL         string        `json:"icon_url"`
-	IconLargeURL    string        `json:"icon_url_large"`
-	IconDragURL     string        `json:"icon_drag_url"`
-	Name            string        `json:"name"`
-	NameColor       string        `json:"name_color"`
-	MarketName      string        `json:"market_name"`
-	MarketHashName  string        `json:"market_hash_name"`
-	MarketFeeApp    uint32        `json:"market_fee_app"`
-	Comodity        bool          `json:"comodity"`
-	Actions         []*EconAction `json:"actions"`
-	Tags            []*EconTag    `json:"tags"`
-	Descriptions    []*EconDesc   `json:"descriptions"`
+	AppID                       uint32        `json:"appid,omitempty"`
+	ClassID                     uint64        `json:"classid,string"`    // for matching with EconItem
+	InstanceID                  uint64        `json:"instanceid,string"` // for matching with EconItem
+	Currency                    bool          `json:"currency,omitempty"`
+	Tradable                    bool          `json:"tradable"`
+	BackgroundColor             string        `json:"background_color"`
+	IconURL                     string        `json:"icon_url"`
+	IconLargeURL                string        `json:"icon_url_large"`
+	IconDragURL                 string        `json:"icon_drag_url,omitempty"`
+	Name                        string        `json:"name"`
+	NameColor                   string        `json:"name_color"`
+	Type                        string        `json:"type,omitempty"`
+	MarketName                  string        `json:"market_name"`
+	MarketHashName              string        `json:"market_hash_name"`
+	MarketFeeApp                uint32        `json:"market_fee_app,omitempty"`
+	Commodity                   bool          `json:"commodity"`
+	MarketTradableRestriction   int           `json:"market_tradable_restriction,omitempty"`
+	MarketMarketableRestriction int           `json:"market_marketable_restriction,omitempty"`
+	Marketable                  bool          `json:"marketable,omitempty"`
+	Actions                     []*EconAction `json:"actions,omitempty"`
+	Tags                        []*EconTag    `json:"tags"`
+	Descriptions                []*EconDesc   `json:"descriptions"`
+	Sealed                      bool          `json:"sealed,omitempty"`
+	MarketBucketGroupName       string        `json:"market_bucket_group_name,omitempty"`
+	MarketBucketGroupID         string        `json:"market_bucket_group_id,omitempty"`
+	SealedType                  int           `json:"sealed_type,omitempty"`
 }
 
 type TradeOffer struct {
@@ -165,6 +178,9 @@ type TradeOffer struct {
 	EscrowEndDate      int64       `json:"escrow_end_date"`
 	RealTime           bool        `json:"from_real_time_trade"`
 	IsOurOffer         bool        `json:"is_our_offer"`
+	EResult            int         `json:"eresult,omitempty"`
+	DelaySettlement    bool        `json:"delay_settlement,omitempty"`
+	SettlementDate     int64       `json:"settlement_date,omitempty"`
 }
 
 type TradeOfferResponse struct {
@@ -172,6 +188,7 @@ type TradeOfferResponse struct {
 	SentOffers     []*TradeOffer   `json:"trade_offers_sent"`     // GetTradeOffers
 	ReceivedOffers []*TradeOffer   `json:"trade_offers_received"` // GetTradeOffers
 	Descriptions   []*EconItemDesc `json:"descriptions"`          // GetTradeOffers
+	NextCursor     int             `json:"next_cursor,omitempty"`
 }
 
 type APIResponse struct {
