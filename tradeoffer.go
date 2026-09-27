@@ -161,6 +161,10 @@ type EconItemDesc struct {
 	MarketBucketGroupName       string        `json:"market_bucket_group_name,omitempty"`
 	MarketBucketGroupID         string        `json:"market_bucket_group_id,omitempty"`
 	SealedType                  int           `json:"sealed_type,omitempty"`
+	OwnerDescriptions           []*EconDesc   `json:"owner_descriptions,omitempty"` // only for the owner's own session
+	MarketActions               []*EconAction `json:"market_actions,omitempty"`
+	FraudWarnings               []string      `json:"fraudwarnings,omitempty"`
+	CacheExpiration             string        `json:"cache_expiration,omitempty"` // RFC 3339; set on trade-locked items (lock end)
 }
 
 type TradeOffer struct {
@@ -208,9 +212,16 @@ func (session *Session) GetTradeOffer(id uint64) (*TradeOffer, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http error: %d", resp.StatusCode)
+	}
+
 	var response APIResponse
 	if err = json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, err
+	}
+	if response.Inner == nil || response.Inner.Offer == nil {
+		return nil, ErrOfferNotFound
 	}
 
 	return response.Inner.Offer, nil
@@ -242,9 +253,16 @@ func (session *Session) GetTradeOffers() (*TradeOfferResponse, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http error: %d", resp.StatusCode)
+	}
+
 	var response APIResponse
 	if err = json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, err
+	}
+	if response.Inner == nil {
+		return &TradeOfferResponse{}, nil
 	}
 
 	return response.Inner, nil

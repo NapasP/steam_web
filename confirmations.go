@@ -20,6 +20,10 @@ type Confirmation struct {
 	Creator      string `json:"creator_id"`
 	Nonce        string `json:"nonce"`
 	CreationTime uint64 `json:"creation"`
+	// Fields of the current mobileconf/getlist JSON.
+	CreationTimeUnix uint64 `json:"creation_time"`
+	TypeName         string `json:"type_name"`
+	Headline         string `json:"headline"`
 
 	// TypeName string      `json:"type_name"`
 	// Cancel   string      `json:"cancel"`
@@ -76,8 +80,23 @@ func (session *Session) GetConfirmations(identitySecret string, current int64) (
 	b, _ := io.ReadAll(resp.Body)
 
 	//d := json.NewDecoder(resp.Body)
-	if err = json.Unmarshal(b, &confirmationResponse); err != nil || !confirmationResponse.Success {
+	if err = json.Unmarshal(b, &confirmationResponse); err != nil {
 		return nil, err
+	}
+	if !confirmationResponse.Success {
+		var extra struct {
+			NeedAuth bool   `json:"needauth"`
+			Message  string `json:"message"`
+		}
+		_ = json.Unmarshal(b, &extra)
+		se := &SteamError{Op: "GetConfirmations", Message: extra.Message}
+		if extra.NeedAuth {
+			se.Cause = CauseNotLoggedIn
+		}
+		if se.Message == "" {
+			se.Message = "unsuccessful response"
+		}
+		return nil, se
 	}
 
 	return confirmationResponse.Confirmations, nil
@@ -123,4 +142,25 @@ func (session *Session) AnswerConfirmation(confirmation *Confirmation, identityS
 
 func (confirmation *Confirmation) Answer(session *Session, key, answer string, current int64) error {
 	return session.AnswerConfirmation(confirmation, key, answer, current)
+}
+
+// ConfirmationTypeTrade is the mobileconf "type" of trade offer confirmations.
+const ConfirmationTypeTrade = 2
+
+// AcceptConfirmationForObject finds the pending mobile confirmation created for objectID (a trade offer id)
+// and accepts it, like steamcommunity's acceptConfirmationForObject. current is the Steam-aligned unix time.
+// Returns ErrConfirmationNotFound when no such confirmation is pending.
+func (session *Session) AcceptConfirmationForObject(identitySecret string, objectID uint64, current int64) error {
+	confs, err := session.GetConfirmations(identitySecret, current)
+	if err != nil {
+		return err
+	}
+	want := strconv.FormatUint(objectID, 10)
+	for _, c := range confs {
+		if c != nil && c.Creator == want {
+			// tag/op "allow" = accept (same as node-steamcommunity's respondToConfirmation).
+			return session.AnswerConfirmation(c, identitySecret, "allow", current)
+		}
+	}
+	return ErrConfirmationNotFound
 }

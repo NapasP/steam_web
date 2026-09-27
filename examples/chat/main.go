@@ -1,3 +1,7 @@
+//go:build ignore
+
+// Legacy example from the upstream doctype/steam fork: it targets an older API and is excluded from the build.
+
 package main
 
 import (
